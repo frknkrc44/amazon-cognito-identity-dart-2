@@ -314,6 +314,44 @@ class CognitoUser {
     return null;
   }
 
+  // This is used to set device remembered status
+  Future<void> setDeviceRememberedStatus(bool status) async {
+    final authParameters = {};
+    final keyPrefix = 'CognitoIdentityServiceProvider.${pool.getClientId()}';
+    final lastUserKey = '$keyPrefix.LastAuthUser';
+
+    if (await storage.getItem(lastUserKey) != null) {
+      username = await storage.getItem(lastUserKey);
+      final deviceKeyKey = '$keyPrefix.$username.deviceKey';
+      _deviceKey = await storage.getItem(deviceKeyKey);
+      authParameters['DEVICE_KEY'] = _deviceKey;
+      if (_clientSecretHash != null) {
+        authParameters['SECRET_HASH'] = _clientSecretHash;
+      }
+    }
+
+    final paramsReq = {
+      'ClientId': pool.getClientId(),
+      'AccessToken': _signInUserSession!.accessToken.getJwtToken(),
+      'DeviceKey': _deviceKey,
+      'DeviceRememberedStatus': status ? 'remembered' : 'not_remembered',
+      'AuthParameters': authParameters,
+    };
+    if (getUserContextData() != null) {
+      paramsReq['UserContextData'] = getUserContextData();
+    }
+    _analyticsMetadataParamsDecorator.call(paramsReq);
+
+    try {
+      await client!.request('UpdateDeviceStatus', paramsReq);
+    } on CognitoClientException catch (e) {
+      if (e.code == 'NotAuthorizedException') {
+        await clearCachedTokens();
+      }
+      rethrow;
+    }
+  }
+
   CognitoUserSession? getSignInUserSession() {
     return _signInUserSession;
   }
