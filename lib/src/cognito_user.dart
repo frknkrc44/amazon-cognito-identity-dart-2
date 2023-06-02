@@ -535,7 +535,8 @@ class CognitoUser {
       AuthenticationDetails authDetails) async {
     if (authenticationFlowType == 'USER_PASSWORD_AUTH') {
       return await _authenticateUserPlainUsernamePassword(authDetails);
-    } else if (authenticationFlowType == 'USER_SRP_AUTH') {
+    } else if (authenticationFlowType == 'USER_SRP_AUTH' ||
+			         authenticationFlowType == 'CUSTOM_AUTH') {
       return await _authenticateUserDefaultAuth(authDetails);
     }
     throw UnimplementedError('Authentication flow type is not supported.');
@@ -931,8 +932,21 @@ class CognitoUser {
       paramsReq['UserContextData'] = getUserContextData();
     }
 
-    final dataAuthenticate = await client!.request('RespondToAuthChallenge',
-        await _analyticsMetadataParamsDecorator.call(paramsReq));
+    dynamic dataAuthenticate;
+    try {
+      dataAuthenticate = await client!.request('RespondToAuthChallenge',
+          await _analyticsMetadataParamsDecorator.call(paramsReq));
+    } on CognitoClientException catch (e) {
+      // When trying to use MFA with a non verified phone_number this
+      // missleading error will be received because Cognito expects in this case
+      // the GUID style user name instead of the normal user name used in every
+      // other request.
+      if (e.code == "UserNotFoundException") {
+        throw CognitoUserPhoneNumberVerificationNecessaryException();
+      } else {
+        rethrow;
+      }
+    }
 
     final String? challengeName = dataAuthenticate['ChallengeName'];
 
@@ -980,7 +994,7 @@ class CognitoUser {
         ['DeviceKey'];
     await cacheDeviceKeyAndPassword();
     if (dataConfirm['UserConfirmationNecessary'] == true) {
-      throw CognitoUserConfirmationNecessaryException(
+      throw CognitoUserDeviceConfirmationNecessaryException(
           signInUserSession: _signInUserSession);
     }
 
@@ -1007,11 +1021,34 @@ class CognitoUser {
     return true;
   }
 
-  /// This is used by authenticated users to enable MFA for him/herself
+  /// This is used by authenticated users to enable SMS-MFA for him/herself.
+  /// A verified phone number is required.
   Future<bool> enableMfa() async {
     if (_signInUserSession == null || !_signInUserSession!.isValid()) {
       throw Exception('User is not authenticated');
     }
+    
+    bool phoneNumberVerified = false;
+    final getUserParamsReq = {
+      'AccessToken': _signInUserSession!.getAccessToken().getJwtToken(),
+    };
+    final userData = await client!.request('GetUser', getUserParamsReq);
+
+    if (userData['UserAttributes'] != null) {
+      dynamic userAttributes = userData['UserAttributes'];
+      phoneNumberVerified = null !=
+          userAttributes.firstWhere(
+              (attribute) =>
+                  attribute['Name'] == 'phone_number_verified' &&
+                  attribute['Value'] == 'true', orElse: () {
+            return null;
+          });
+    }
+
+    if (!phoneNumberVerified) {
+      throw CognitoUserPhoneNumberVerificationNecessaryException(
+          signInUserSession: _signInUserSession);
+    }    
 
     final mfaOptions = [];
     final mfaEnabled = {
@@ -1183,6 +1220,8 @@ class CognitoUser {
   }
 
   /// This is used by authenticated users to change a list of attributes
+  /// If phone_number is changed it needs to be verified to be able to use it
+  /// for MFA.
   Future<bool> updateAttributes(List<CognitoUserAttribute> attributes) async {
     if (_signInUserSession == null || !_signInUserSession!.isValid()) {
       throw Exception('User is not authenticated');

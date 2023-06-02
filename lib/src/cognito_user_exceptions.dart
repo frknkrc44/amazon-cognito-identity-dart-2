@@ -100,3 +100,25 @@ class CognitoUserConfirmationNecessaryException extends CognitoUserException {
   CognitoUserConfirmationNecessaryException(
       {this.signInUserSession, this.message = 'User Confirmation Necessary'});
 }
+
+class CognitoUserDeviceConfirmationNecessaryException
+    extends CognitoUserException {
+  @override
+  String? message;
+  CognitoUserSession? signInUserSession;
+
+  CognitoUserDeviceConfirmationNecessaryException(
+      {this.signInUserSession,
+      this.message = 'User Device Confirmation Necessary'});
+}
+
+class CognitoUserPhoneNumberVerificationNecessaryException
+    extends CognitoUserException {
+  @override
+  String? message;
+  CognitoUserSession? signInUserSession;
+
+  CognitoUserPhoneNumberVerificationNecessaryException(
+      {this.signInUserSession,
+      this.message = 'Verification of Attribute \'phone_number\' Necessary'});
+}
